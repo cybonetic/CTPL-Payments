@@ -1,0 +1,38 @@
+{
+    "name": "cybonetic/ctpl-payments-laravel",
+    "description": "Take payments through the CTPL Central Payment Orchestrator from a Laravel application.",
+    "type": "library",
+    "license": "proprietary",
+    "keywords": ["laravel", "payments", "ctpl", "payment-orchestrator"],
+    "require": {
+        "php": "^8.2",
+        "ext-json": "*",
+        "guzzlehttp/guzzle": "^7.8",
+        "illuminate/contracts": "^11.0|^12.0|^13.0",
+        "illuminate/http": "^11.0|^12.0|^13.0",
+        "illuminate/support": "^11.0|^12.0|^13.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0|^10.0|^11.0",
+        "phpunit/phpunit": "^11.0|^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Ctpl\\Payments\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Ctpl\\Payments\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": ["Ctpl\\Payments\\PaymentsServiceProvider"],
+            "aliases": { "Payments": "Ctpl\\Payments\\Facades\\Payments" }
+        }
+    },
+    "config": { "sort-packages": true },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
