@@ -136,6 +136,46 @@
          * only way this class of mistake gets caught.
          */
         var returnUrl = payload.callback_url || payload.return_url || null;
+        var sessionUrl = @json($data['session_url'] ?? null);
+        /*
+         * ------------------------------------------------------------------
+         *  LET THE PLATFORM SEE THE PAYER, ONCE, BEFORE HANDING OFF
+         * ------------------------------------------------------------------
+         *
+         * An order is created by your server, so the address on that
+         * request is your data centre. From here the customer goes
+         * straight to the gateway. Without this call the platform never
+         * sees their browser at all, and every payer field on the
+         * payment is empty — address, device, location, network.
+         * Reported from a live install exactly that way.
+         *
+         * `no-cors`, deliberately. Nothing here reads the response: the
+         * checkout is already on this page. A no-cors GET is a simple
+         * request, so it needs no preflight and no CORS headers on the
+         * platform, and the REQUEST still arrives even though the reply
+         * is withheld from this script. Asking for a readable response
+         * would make recording the payer depend on a cross-origin policy
+         * that has nothing to do with it.
+         *
+         * `keepalive`, so a browser that navigates to the gateway a
+         * moment later does not cancel it in flight.
+         *
+         * Not awaited, and failure is ignored. The customer is here to
+         * pay; a diagnostic field is never worth delaying a handoff or
+         * failing one.
+         */
+        if (sessionUrl && window.fetch) {
+            try {
+                fetch(sessionUrl, {
+                    method: 'GET',
+                    mode: 'no-cors',
+                    credentials: 'omit',
+                    cache: 'no-store',
+                    keepalive: true,
+                }).catch(function () {});
+            } catch (e) { /* never blocks the payment */ }
+        }
+
         var spin = document.getElementById('ctpl-spin');
         var message = document.getElementById('ctpl-message');
         var error = document.getElementById('ctpl-error');

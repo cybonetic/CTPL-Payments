@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.0
+
+- **The checkout page lets the platform see the payer.** An order is created
+  by your server, so the address on that request is your data centre; from
+  the checkout page the customer goes straight to the gateway. Without a
+  call from the browser the platform never sees them at all, and every payer
+  field on the payment is empty — address, device, location, network.
+  Reported from a live install exactly that way.
+
+  The page now calls `GET /checkout/sessions/{token}` once before handing
+  off. `no-cors`, not awaited, failures ignored: nothing here reads the
+  response (the checkout is already on the page), a no-cors GET needs no
+  preflight and no CORS headers, and the REQUEST still arrives. Recording a
+  payer should not depend on a cross-origin policy that has nothing to do
+  with it, and a diagnostic field is never worth delaying a payment.
+- `Checkout` and `payloadFor()` carry `session_url`, built from the
+  package's own platform constant rather than assembled in a view.
+- The matching platform release fills the block and returns it on the order
+  API and in `payment.captured`, alongside the customer's name, email and
+  phone.
+
 ## 1.1.4
 
 The report, sharpened: "when I make the payment and the razorpay returns

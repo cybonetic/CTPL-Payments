@@ -32,7 +32,7 @@ if ($order->isPaid()) {
 ## Install
 
 ```bash
-composer require ctpl/ctpl-payments
+composer require cybonetic/ctpl-payments-laravel
 php artisan vendor:publish --tag=ctpl-payments-config   # optional
 ```
 

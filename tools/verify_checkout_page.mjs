@@ -253,6 +253,7 @@ function buildCases() {
         }
 
         const fetched = [];
+        const pinged = [];
         const jsErrors = [];
         page.on('pageerror', e => jsErrors.push(e.message));
 
@@ -327,6 +328,12 @@ function buildCases() {
                 });
             }
 
+            if (url.includes('/api/v1/checkout/sessions/')) {
+                pinged.push(url);
+
+                return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+            }
+
             fetched.push(new URL(url).host);
 
             return route.fulfill({ status: 204, body: '' });
@@ -369,6 +376,25 @@ function buildCases() {
             hasWayOut: document.querySelector('a.btn') !== null,
             spinning: getComputedStyle(document.getElementById('ctpl-spin')).display !== 'none',
         }));
+
+        /*
+         * ------------------------------------------------------------------
+         *  THE PLATFORM HAS TO SEE THE PAYER
+         * ------------------------------------------------------------------
+         *
+         * An order is created server-to-server, so the address on that
+         * request is the application's data centre. If this page does not
+         * call the session endpoint from the BROWSER, the platform never
+         * sees the customer at all and every payer field on the payment
+         * is empty — which is exactly what was reported.
+         */
+        if (testCase.checkout.token && testCase.checkout.token !== 'tok') {
+            if (pinged.length === 1) {
+                ok('called the platform once, so the payer is recorded');
+            } else {
+                note(testCase.name, `called the session endpoint ${pinged.length} times, expected once`);
+            }
+        }
 
         const third = [...new Set(fetched)];
 

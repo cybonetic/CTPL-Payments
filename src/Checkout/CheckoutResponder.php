@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Ctpl\Payments\Checkout;
 
+use Ctpl\Payments\Client\Config;
 use Ctpl\Payments\Data\Checkout;
 use Ctpl\Payments\Data\PaymentOrder;
 use Ctpl\Payments\Enums\CheckoutType;
@@ -157,6 +158,31 @@ final class CheckoutResponder
         return [
             'type' => $checkout->type->value,
             'provider' => $checkout->provider,
+
+            /**
+             * ------------------------------------------------------------------
+             *  THE ONE MOMENT THE PLATFORM CAN SEE THE PAYER
+             * ------------------------------------------------------------------
+             *
+             * An order is created server-to-server, so the address on
+             * THAT request is the application's data centre. The customer
+             * then goes from this page straight to the gateway, and the
+             * platform never sees their browser at all — which is why
+             * every payer field on an SDK-driven payment was empty while
+             * the payment-link surface recorded everything.
+             *
+             * So the checkout page calls this once, from the browser,
+             * before handing off. It is the same endpoint the payment
+             * link surface uses and it carries the same session token
+             * that is already on this page.
+             *
+             * Built here rather than in the view because the platform
+             * URL is a constant of this package and a view has no
+             * business knowing it.
+             */
+            'session_url' => $checkout->token === ''
+                ? null
+                : Config::PLATFORM_URL . '/api/v1/checkout/sessions/' . rawurlencode($checkout->token),
             'session_id' => $checkout->sessionId,
             'token' => $checkout->token,
             'redirect_url' => $checkout->redirectUrl,

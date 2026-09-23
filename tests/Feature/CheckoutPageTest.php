@@ -291,6 +291,59 @@ final class CheckoutPageTest extends TestCase
         $this->assertStringContainsString('Checking your payment', $html);
     }
 
+    /**
+     * ------------------------------------------------------------------
+     *  THE ONE MOMENT THE PLATFORM CAN SEE THE PAYER
+     * ------------------------------------------------------------------
+     *
+     * An order is created by the application's server, so the address on
+     * that request is its data centre. From this page the customer goes
+     * straight to the gateway. Without a call from the BROWSER the
+     * platform never sees them, and every payer field on the payment is
+     * empty — which is what was reported.
+     *
+     * That the request is actually made, once, is proved in a browser by
+     * `tools/verify_checkout_page.mjs`.
+     */
+    #[Test]
+    public function the_page_lets_the_platform_see_the_payer(): void
+    {
+        $html = $this->render($this->checkout([
+            'token' => 'tok_live_abc',
+            'public_key' => 'rzp_test_1',
+            'payload' => ['provider' => 'RAZORPAY', 'gateway_order_id' => 'order_1'],
+        ]));
+
+        $this->assertStringContainsString('checkout\/sessions\/tok_live_abc', $html);
+
+        // `no-cors`, because nothing here reads the reply — the checkout
+        // is already on the page — and requiring a readable response
+        // would make recording a payer depend on a cross-origin policy
+        // that has nothing to do with it.
+        $this->assertStringContainsString("mode: 'no-cors'", $html);
+
+        // Never awaited, never fatal. The customer is here to pay.
+        $this->assertStringContainsString('keepalive: true', $html);
+    }
+
+    /** And it is the platform's own address, which no application can choose. */
+    #[Test]
+    public function the_payer_call_goes_to_the_platform_and_nowhere_an_application_can_name(): void
+    {
+        config()->set('ctpl-payments.base_url', 'https://somewhere-else.invalid');
+
+        $html = $this->render($this->checkout([
+            'token' => 'tok_live_abc',
+            'payload' => ['provider' => 'CASHFREE', 'payment_session_id' => 'session_x'],
+        ]));
+
+        $this->assertStringContainsString(
+            str_replace('/', '\/', \Ctpl\Payments\Client\Config::PLATFORM_URL),
+            $html,
+        );
+        $this->assertStringNotContainsString('somewhere-else.invalid', $html);
+    }
+
     // -----------------------------------------------------------------
     // What must never be on the page
     // -----------------------------------------------------------------
