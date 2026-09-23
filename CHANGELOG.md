@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.1
+
+- The orchestrator's URL is a constant, not a setting. An application
+  configures a client id and secret and nothing else. A base URL that
+  anything able to write to `.env` can change is one a leaked deploy
+  credential can point at a host of its choosing, taking every payment
+  and every access token with it.
+- `CTPL_PAYMENTS_BASE_URL_OVERRIDE` exists for this package's own
+  integration suite and is honoured only in `local` and `testing`.
+
 ## 1.0.0
 
 First release. The application-facing surface of the CTPL Central Payment

@@ -6,18 +6,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Where the orchestrator is
+    | Where the orchestrator is — and it is not here
     |--------------------------------------------------------------------------
     |
-    | The host only — the SDK adds `/api/v1`. Point a staging application at a
-    | staging credential rather than at a different host: which gateway
-    | accounts a payment may use is decided by the APPLICATION's environment
-    | on the platform side, so a staging credential cannot reach production
-    | money even against the production host.
+    | There is deliberately no setting for it. The URL is a constant in the
+    | package (`Ctpl\Payments\Client\Config::PLATFORM_URL`), because an
+    | application does not get to choose where its payments go: a base URL
+    | that anything able to write a line into `.env` can change is one that a
+    | leaked deploy credential can point at a host of its choosing, silently,
+    | taking every payment and every access token with it.
+    |
+    | Staging is not a different host. Which gateway accounts a payment may
+    | use is decided by the environment of the APPLICATION your credential
+    | belongs to, on the platform side — so a staging credential cannot reach
+    | production money, and that separation is the platform's rather than
+    | something each application has to arrange correctly.
     |
     */
-
-    'base_url' => env('CTPL_PAYMENTS_URL', 'https://pay.cybonetic.com'),
 
     /*
     |--------------------------------------------------------------------------

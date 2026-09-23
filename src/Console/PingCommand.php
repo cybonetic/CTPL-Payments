@@ -24,7 +24,10 @@ final class PingCommand extends Command
 
     public function handle(PaymentsManager $payments): int
     {
-        $this->line('Reaching ' . config('ctpl-payments.base_url') . ' …');
+        // The constant, not a setting — there is no setting. Printed
+        // because "which host am I even talking to" is the first thing
+        // somebody wants confirmed when a payment will not go through.
+        $this->line('Reaching ' . \Ctpl\Payments\Client\Config::PLATFORM_URL . ' …');
 
         try {
             // Two calls on purpose. The first proves the credential can

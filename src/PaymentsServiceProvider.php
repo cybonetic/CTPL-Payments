@@ -32,6 +32,10 @@ final class PaymentsServiceProvider extends ServiceProvider
          */
         $this->app->singleton(Config::class, fn ($app): Config => Config::fromArray(
             (array) $app['config']->get('ctpl-payments', []),
+            // The environment, so `Config` can decide whether its
+            // local-only URL override applies. It never does outside
+            // `local` and `testing`.
+            (string) $app->environment(),
         ));
 
         $this->app->singleton(TokenStore::class, fn ($app): TokenStore => new TokenStore(

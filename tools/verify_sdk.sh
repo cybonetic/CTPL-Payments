@@ -48,7 +48,10 @@ echo
 echo "== issuing a credential on the install under test =="
 CREDS="$(cd "$ORCHESTRATOR" && php tools/seed_api_client.php)"
 
-export CTPL_PAYMENTS_URL="$BASE"
+# NOT CTPL_PAYMENTS_URL — there is no such setting. The platform URL
+# is a constant in the package; this override is read only when the
+# app environment is local or testing, which testbench is.
+export CTPL_PAYMENTS_BASE_URL_OVERRIDE="$BASE"
 export CTPL_PAYMENTS_CLIENT_ID="$(echo "$CREDS" | sed -n 's/^client_id=//p')"
 export CTPL_PAYMENTS_CLIENT_SECRET="$(echo "$CREDS" | sed -n 's/^client_secret=//p')"
 export CTPL_TEST_AMOUNT="$(echo "$CREDS" | sed -n 's/^amount=//p')"

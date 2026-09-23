@@ -37,10 +37,21 @@ php artisan vendor:publish --tag=ctpl-payments-config   # optional
 ```
 
 ```dotenv
-CTPL_PAYMENTS_URL=https://pay.cybonetic.com
 CTPL_PAYMENTS_CLIENT_ID=ctpl_clinic_xxxxxxxxxxxx
 CTPL_PAYMENTS_CLIENT_SECRET=...
 ```
+
+That is the whole configuration. **There is no URL to set** — the
+orchestrator's address is a constant in the package, and deliberately not
+something an application can change. A base URL that anything able to
+write a line into `.env` can change is one that a leaked deploy
+credential can quietly point at a host of its choosing, taking every
+payment and every access token with it.
+
+Staging is not a different host either: which gateway accounts a payment
+may use is decided by the environment of the *application* your credential
+belongs to, on the platform side. A staging credential cannot reach
+production money.
 
 Credentials are issued per application from the operator portal, and the
 secret is shown once. Then:
@@ -363,6 +374,13 @@ real credential, runs the platform's confirmation sweep in the background,
 and takes a real payment through to captured, refunds it, makes a link and
 withdraws it.
 
+The integration suite is the one place the platform URL is not the
+constant — `CTPL_PAYMENTS_BASE_URL_OVERRIDE` points it at a local install,
+and `Config` honours that **only** when the application environment is
+`local` or `testing`. In anything else the constant wins and the variable
+is ignored, so the escape hatch that makes the suite possible cannot be
+used to redirect a real application's payments.
+
 It also checks the webhook signature against the **platform's own signer**,
 in the platform's own process. Signing and verifying with the same class
 proves only that the class agrees with itself; if the scheme were wrong,
@@ -377,6 +395,9 @@ first real delivery was refused.
 No inference from a redirect, no trusting a webhook body, no reading a
 gateway's word at initiation. The platform holds that line internally and
 this package holds it at the edge.
+
+**It will not let an application choose where payments go.** The URL is a
+constant, not a setting. See the install section.
 
 **It will not expose a gateway.** No gateway payment id, no gateway order
 id, no branching on which provider took the money. An integration that
