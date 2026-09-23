@@ -184,6 +184,113 @@ final class CheckoutPageTest extends TestCase
         $this->assertStringContainsString('handlers.qr(', $html);
     }
 
+    /**
+     * ------------------------------------------------------------------
+     *  THE SPINNER IS ON A CLOCK
+     * ------------------------------------------------------------------
+     *
+     * Reported twice from a live install, with different causes and an
+     * identical symptom: this page showing "taking you to your payment
+     * provider" and never doing anything else.
+     *
+     * That sameness is the real defect. A gateway's script can be
+     * blocked by a content-security policy or an extension, its CDN can
+     * be unreachable, and its own code can sit waiting on a value nobody
+     * passed it — none of which raises anything this page can catch. A
+     * spinner is a promise that something is happening, and nothing was
+     * keeping that promise honest.
+     *
+     * Whether the clock actually fires is proved in a browser, by
+     * `tools/verify_checkout_page.mjs`, which hangs the script request
+     * and waits it out. This asserts the mechanism is present at all —
+     * cheap, and it catches the tidy-up that deletes it.
+     */
+    #[Test]
+    public function the_page_gives_up_rather_than_spinning_for_ever(): void
+    {
+        $html = $this->render($this->checkout([
+            'public_key' => 'rzp_test_1',
+            'payload' => ['provider' => 'RAZORPAY', 'gateway_order_id' => 'order_1'],
+        ]));
+
+        $this->assertStringContainsString('HANDOFF_SECONDS', $html);
+        $this->assertStringContainsString('did not respond within', $html);
+
+        /*
+         * And the case a leftover iframe used to silence.
+         *
+         * The first watchdog asked whether any gateway element was on
+         * the page and returned if so. Razorpay leaves its container
+         * behind when its modal closes, so for the reported state —
+         * "razorpay returns with the success or failure response then it
+         * gets stuck at the spinner" — the check found that container,
+         * concluded all was well, and said nothing.
+         */
+        // A source-contiguous fragment: the sentence is built by
+        // concatenation, so the whole phrase only exists once a browser
+        // has run the page. That the customer SEES it is proved in a
+        // browser by tools/verify_checkout_page.mjs.
+        $this->assertStringContainsString('was never told what', $html);
+        $this->assertStringContainsString('PAYING_SECONDS', $html);
+
+        // And what it says is a failure to HAND OFF, never to pay.
+        $this->assertStringContainsString('No money has been taken', $html);
+    }
+
+    /**
+     * Razorpay does not refuse a missing key — it opens and hangs on its
+     * own loading shield for ever.
+     *
+     * Verified by loading the real script with `public_key` removed: the
+     * modal appears and never finishes, with no error and no callback.
+     * So the page refuses before fetching anything, where the message
+     * can name the field and say whose problem it is.
+     */
+    #[Test]
+    public function a_gateway_that_cannot_open_is_refused_before_its_script_is_fetched(): void
+    {
+        $html = $this->render($this->checkout([
+            'public_key' => null,
+            'payload' => ['provider' => 'RAZORPAY', 'gateway_order_id' => 'order_1'],
+        ]));
+
+        $this->assertStringContainsString('no publishable key for Razorpay', $html);
+        $this->assertStringContainsString('no Cashfree payment session id', $html);
+    }
+
+    /**
+     * The handback is a POST carrying what the gateway signed.
+     *
+     * `redirect: true` is supposed to mean Razorpay posts its signed
+     * response to `callback_url` itself. When it does not, this page
+     * does it by hand rather than leaving a paid customer on a spinner —
+     * and as a POST, because `razorpay_signature` is the only thing that
+     * proves the handback is authentic and a GET throws it away.
+     *
+     * That the callbacks are actually WIRED to this is proved in a
+     * browser by invoking them; asserting a function exists is not
+     * asserting it works, and the version of that check which only
+     * counted them passed while the bug was live.
+     */
+    #[Test]
+    public function the_handback_is_posted_with_the_gateways_own_evidence(): void
+    {
+        $html = $this->render($this->checkout([
+            'public_key' => 'rzp_test_1',
+            'payload' => [
+                'provider' => 'RAZORPAY',
+                'gateway_order_id' => 'order_1',
+                'callback_url' => 'https://pay.cybonetic.com/api/v1/checkout/return/tok',
+            ],
+        ]));
+
+        $this->assertStringContainsString("form.method = 'POST'", $html);
+        $this->assertStringContainsString('leaveForPlatform', $html);
+
+        // Not an outcome — the platform still asks the gateway.
+        $this->assertStringContainsString('Checking your payment', $html);
+    }
+
     // -----------------------------------------------------------------
     // What must never be on the page
     // -----------------------------------------------------------------

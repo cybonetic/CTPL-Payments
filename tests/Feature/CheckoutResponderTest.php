@@ -87,6 +87,15 @@ final class CheckoutResponderTest extends TestCase
         // Every signed field, present and unaltered. A form missing one
         // of these is a hash that does not match, and PayU answers that
         // with an error page rather than a payment.
+        /*
+         * PayU's own published list, and all ten of it.
+         *
+         * The platform was omitting `key` — it went into the hash and
+         * into `public_key` and never into the form — and PayU answered
+         * "Mandatory parameter missing from your transaction request
+         * are: key, phone". This package could not have supplied it, but
+         * it can refuse to be the place the omission goes unnoticed.
+         */
         foreach ([
             'key' => 'gtKFFx',
             'txnid' => 'T-9f2c41aa',
@@ -94,6 +103,7 @@ final class CheckoutResponderTest extends TestCase
             'productinfo' => 'Room booking',
             'firstname' => 'Asha',
             'email' => 'asha@example.test',
+            'phone' => '919000000001',
             'surl' => 'https://pay.cybonetic.com/api/v1/checkout/return/tok',
             'furl' => 'https://pay.cybonetic.com/api/v1/checkout/return/tok',
         ] as $field => $value) {

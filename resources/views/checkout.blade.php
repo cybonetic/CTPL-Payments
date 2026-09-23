@@ -112,6 +112,30 @@
 
         var payload = @json($payload);
         var publicKey = @json($data['public_key']);
+
+        /*
+         * ------------------------------------------------------------------
+         *  EACH GATEWAY NAMES THE RETURN LEG DIFFERENTLY
+         * ------------------------------------------------------------------
+         *
+         * Razorpay's payload calls it `callback_url`; Cashfree's calls it
+         * `return_url`. This page read `return_url` for both — so for a
+         * Razorpay payment it was `undefined`, and `redirect: true` with
+         * no callback URL means Razorpay opens the modal, takes the
+         * money, and then has nowhere to send the customer. The modal
+         * closes and the page underneath is still the spinner.
+         *
+         * Reported from a live install, as a checkout that said "taking
+         * you to your payment provider" forever, AFTER the customer had
+         * paid.
+         *
+         * Every check passed, because the fixture those checks ran on had
+         * `return_url` in it — a payload written here rather than one the
+         * platform produces. `tools/verify_checkout_page.mjs` now takes
+         * its payloads from the orchestrator's own adapters, which is the
+         * only way this class of mistake gets caught.
+         */
+        var returnUrl = payload.callback_url || payload.return_url || null;
         var spin = document.getElementById('ctpl-spin');
         var message = document.getElementById('ctpl-message');
         var error = document.getElementById('ctpl-error');
@@ -123,11 +147,209 @@
          * place. So the customer is told the handoff did not work and
          * offered another go.
          */
+        var handedOff = false;
+
+        /*
+         * Every failure here is a failure to HAND OFF, never a failure
+         * to pay: nothing on this page can know whether money moved, and
+         * saying so would be the redirect-is-evidence mistake in a new
+         * place. So the customer is told the handoff did not work and
+         * given somewhere to go.
+         */
         function stuck(what) {
+            if (handedOff) { return; }
+
+            handedOff = true;
+            clearTimeout(watchdog);
+
             spin.style.display = 'none';
             message.textContent = 'We could not reach your payment provider.';
-            error.textContent = what + ' No money has been taken. Please try again.';
+            error.textContent = what + ' No money has been taken.';
             error.style.display = 'block';
+
+            /*
+             * A way out, not a dead end.
+             *
+             * The return leg belongs to the platform, which looks the
+             * payment up server-side and sends the customer where their
+             * application wants them. Better than "please try again" at
+             * a page that has already failed once.
+             */
+            if (returnUrl) {
+                var a = document.createElement('a');
+                a.className = 'btn';
+                a.href = returnUrl;
+                a.textContent = 'Go back and try again';
+                error.parentNode.appendChild(a);
+            }
+
+            // For whoever is looking at a console rather than at a card.
+            if (window.console && console.error) {
+                console.error('[ctpl-payments] handoff failed:', what, {
+                    provider: provider || '(not named by the platform)',
+                    type: type,
+                    payloadKeys: Object.keys(payload),
+                    hasPublicKey: Boolean(publicKey),
+                    returnUrl: returnUrl,
+                });
+            }
+        }
+
+        /*
+         * ------------------------------------------------------------------
+         *  A PAGE THAT CANNOT SPIN FOREVER
+         * ------------------------------------------------------------------
+         *
+         * Reported twice from a live install: this page showing "taking
+         * you to your payment provider" and never doing anything else.
+         *
+         * The causes were different each time and the symptom was
+         * identical, which is the real defect — a spinner is a promise
+         * that something is happening, and there was nothing keeping
+         * that promise honest. A gateway's script can be blocked by a
+         * content-security policy or an extension, its CDN can be
+         * unreachable, and its own code can sit waiting on a value
+         * nobody passed it. None of those raise an error this page can
+         * catch.
+         *
+         * So the spinner is now on a clock. If no gateway UI has
+         * appeared and the browser has not navigated away, the page
+         * stops pretending and says what it was trying to do.
+         */
+        var HANDOFF_SECONDS = 15;
+
+        /*
+         * Long enough for somebody to actually pay.
+         *
+         * Once the gateway's own UI is up, the customer may be reading a
+         * card, waiting for an OTP, or switching to their bank's app. The
+         * page must not interrupt that — but it must not wait for ever
+         * either, because "the gateway finished and nothing happened" is
+         * precisely the state being fixed.
+         */
+        var PAYING_SECONDS = 300;
+
+        var watchdog = null;
+
+        function gatewayUiIsUp() {
+            return document.querySelector('iframe, [class*="razorpay"], [class*="cashfree"]') !== null;
+        }
+
+        /*
+         * ------------------------------------------------------------------
+         *  THE WATCHDOG THAT COULD BE SILENCED BY A LEFTOVER IFRAME
+         * ------------------------------------------------------------------
+         *
+         * The first version of this asked whether any gateway element was
+         * on the page and, if so, returned — reasoning that the gateway
+         * had arrived and the rest was the customer's business.
+         *
+         * Razorpay leaves its container in the DOM after its modal
+         * closes. So for the exact case this was written for — reported
+         * from a live install as "razorpay returns with the success or
+         * failure response then it gets stuck at the spinner" — the
+         * check found an iframe, concluded all was well, and said
+         * nothing. A watchdog that goes quiet in the one situation it
+         * exists for is worse than no watchdog: it makes the page look
+         * supervised.
+         *
+         * So arrival no longer BUYS silence, it buys TIME. Every path
+         * ends in a state the customer can act on.
+         */
+        function arm(seconds) {
+            clearTimeout(watchdog);
+
+            watchdog = setTimeout(function () {
+                if (handedOff) { return; }
+
+                if (gatewayUiIsUp()) {
+                    // Up, and we are still here. Give the customer the
+                    // long clock once, then say something regardless.
+                    if (seconds < PAYING_SECONDS) { return arm(PAYING_SECONDS); }
+
+                    return stuck('Your payment provider opened but this page was never told what '
+                        + 'happened. If you completed the payment, do not pay again \u2014 use the link '
+                        + 'below and the outcome will be looked up.');
+                }
+
+                stuck('Your payment provider did not respond within ' + seconds + ' seconds. '
+                    + 'This is usually a script blocked by a browser extension or a content-security '
+                    + 'policy, or a gateway that is not reachable from this page.');
+            }, seconds * 1000);
+        }
+
+        arm(HANDOFF_SECONDS);
+
+        /*
+         * ------------------------------------------------------------------
+         *  LEAVING, WITH WHATEVER THE GATEWAY HANDED BACK
+         * ------------------------------------------------------------------
+         *
+         * `redirect: true` is supposed to mean Razorpay POSTs its signed
+         * response to `callback_url` itself and this page is gone. When
+         * it does not — and from a live install, it does not — the
+         * customer is left looking at a spinner with the money taken.
+         *
+         * So the JS callback path does the same thing by hand: a form
+         * POST to the same endpoint, carrying the same fields. Two
+         * reasons it is a POST and not `location.href`:
+         *
+         *   The platform VERIFIES that payload. `razorpay_signature` is
+         *   the only thing that proves the handback is authentic, and
+         *   `CheckoutSessionController::callback()` is the first and
+         *   only caller of `verifyPayment()`. A bare GET throws that
+         *   evidence away.
+         *
+         *   And a GET would be indistinguishable from a customer
+         *   refreshing the page.
+         *
+         * It is still not an OUTCOME. The platform verifies the
+         * signature and then runs its own server-side status query
+         * anyway (R1, R12) — an authentic message saying "success" proves
+         * Razorpay sent it, not that the money settled.
+         */
+        function leaveForPlatform(fields) {
+            if (!returnUrl) {
+                return stuck('The platform sent nowhere to return to, so this page cannot hand the '
+                    + 'payment back. An operator needs to look at this application\u2019s return URLs.');
+            }
+
+            handedOff = true;
+            clearTimeout(watchdog);
+
+            message.textContent = 'Checking your payment\u2026';
+
+            var form = document.createElement('form');
+            form.method = 'POST';
+            form.action = returnUrl;
+            form.style.display = 'none';
+
+            var body = fields && typeof fields === 'object' ? fields : {};
+
+            for (var name in body) {
+                if (!Object.prototype.hasOwnProperty.call(body, name)) { continue; }
+                if (body[name] === null || typeof body[name] === 'object') { continue; }
+
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = name;
+                input.value = String(body[name]);
+                form.appendChild(input);
+            }
+
+            document.body.appendChild(form);
+            form.submit();
+
+            /*
+             * And if even that does not move the browser — a sandboxed
+             * frame, a navigation policy — say so rather than leaving a
+             * paid customer on a spinner for the third time.
+             */
+            setTimeout(function () {
+                handedOff = false;
+                stuck('Your payment was completed but this page could not hand it back automatically. '
+                    + 'Do not pay again \u2014 use the link below and the outcome will be looked up.');
+            }, 6000);
         }
 
         function load(src, onready) {
@@ -147,6 +369,34 @@
              * the platform.
              */
             sdk_razorpay: function () {
+                /*
+                 * ------------------------------------------------------------------
+                 *  CHECKED BEFORE THE SCRIPT IS EVEN FETCHED
+                 * ------------------------------------------------------------------
+                 *
+                 * Razorpay's checkout does not refuse a missing key. It
+                 * OPENS, and then sits on its own loading shield for
+                 * ever — no error, no callback, nothing this page can
+                 * catch. Confirmed by loading the real script against a
+                 * payload with `public_key` removed: the modal appears
+                 * and never finishes.
+                 *
+                 * That is a stuck payment with no diagnosis, so it is
+                 * refused here where the message can name the field. The
+                 * key is the platform's to send — it comes from the
+                 * gateway account's credentials — so this is an operator
+                 * problem and the message says so.
+                 */
+                if (!publicKey) {
+                    return stuck('The platform sent no publishable key for Razorpay, and Razorpay\u2019s '
+                        + 'checkout hangs silently without one. The key comes from this gateway '
+                        + 'account\u2019s credentials \u2014 an operator needs to check them.');
+                }
+
+                if (!payload.gateway_order_id) {
+                    return stuck('The platform sent no Razorpay order id, so there is nothing to pay against.');
+                }
+
                 load('https://checkout.razorpay.com/v1/checkout.js', function () {
                     if (typeof Razorpay === 'undefined') { return stuck('The provider’s script did not start.'); }
 
@@ -164,20 +414,49 @@
                          * verifies the signature on it and then runs its
                          * own status query regardless.
                          */
-                        callback_url: payload.return_url,
+                        callback_url: returnUrl,
                         redirect: true,
+
+                        /*
+                         * `redirect: true` should mean Razorpay posts the
+                         * handback to `callback_url` itself and this
+                         * never runs. It is here because "should" is not
+                         * a thing to leave a paid customer's browser
+                         * resting on: a blocked navigation, a popup
+                         * policy, or a Razorpay change, and without this
+                         * the page sits on a spinner with the money
+                         * taken. Nothing here is treated as an outcome —
+                         * it goes to the platform, which asks the
+                         * gateway (R1, R12).
+                         */
+                        /*
+                         * Razorpay calls this with its signed response
+                         * when it does NOT redirect. Handed straight to
+                         * the platform, fields and all.
+                         */
+                        handler: function (response) {
+                            leaveForPlatform(response);
+                        },
                         modal: {
                             ondismiss: function () {
-                                spin.style.display = 'none';
-                                message.textContent = 'You closed the payment window before finishing.';
-                                if (payload.return_url) {
-                                    window.location.href = payload.return_url;
-                                }
+                                /*
+                                 * A customer can close the window AFTER
+                                 * paying, so this is not treated as
+                                 * "they gave up". It goes to the
+                                 * platform with nothing to verify, and
+                                 * the status query decides — which is
+                                 * the only thing that ever decides.
+                                 */
+                                leaveForPlatform({});
                             }
                         }
                     };
 
-                    try { new Razorpay(options).open(); } catch (e) { stuck(String(e && e.message || e)); }
+                    try {
+                        new Razorpay(options).open();
+                    } catch (e) {
+                        return stuck(String(e && e.message || e));
+                    }
                 });
             },
 
@@ -187,6 +466,14 @@
              * and why nothing here looks for one.
              */
             sdk_cashfree: function () {
+                // Cashfree's browser SDK authenticates with the session
+                // id and nothing else, so this is the one field it
+                // cannot be opened without.
+                if (!payload.payment_session_id) {
+                    return stuck('The platform sent no Cashfree payment session id, so its checkout '
+                        + 'cannot be opened.');
+                }
+
                 load('https://sdk.cashfree.com/js/v3/cashfree.js', function () {
                     if (typeof Cashfree === 'undefined') { return stuck('The provider’s script did not start.'); }
 
@@ -232,6 +519,8 @@
             },
 
             qr: function (instruction) {
+                handedOff = true;
+                clearTimeout(watchdog);
                 spin.style.display = 'none';
                 message.textContent = instruction || 'Scan this code with your payment app.';
 
@@ -261,7 +550,19 @@
         };
 
         var type = @json($type);
-        var provider = String(payload.provider || payload.gateway || '').toLowerCase();
+
+        /*
+         * The gateway, BY NAME, from the platform.
+         *
+         * `checkout.provider` is what the platform says it routed to.
+         * The payload sniffing below it is a fallback for an older
+         * orchestrator that does not send it yet — and sniffing is
+         * exactly how a page ends up loading one gateway's script for
+         * another's payment, so it is the fallback and not the rule.
+         */
+        var provider = String(
+            @json($data['provider'] ?? null) || payload.provider || payload.gateway || ''
+        ).toLowerCase();
 
         if (type === 'sdk') {
             /*

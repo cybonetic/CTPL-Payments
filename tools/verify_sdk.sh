@@ -87,5 +87,24 @@ echo "== the integration suite, against $BASE =="
 cd "$PACKAGE"
 vendor/bin/phpunit --testsuite integration
 
+
+# ------------------------------------------------------------------
+#  THE CROSS-CHECK BETWEEN THE TWO CODEBASES
+# ------------------------------------------------------------------
+#
+# Both suites can be green while the form PayU receives is incomplete:
+# the platform's adapter test asserts what the adapter sends, this
+# package's asserts a payload written by hand here, and nothing compares
+# them. That is exactly how the merchant `key` went missing from a live
+# checkout. This renders the orchestrator's own PayU payload with this
+# package and reads the posted form out of a browser.
 echo
-echo "the SDK works against this install"
+echo "== the PayU form, end to end =="
+node tools/verify_payu_form.mjs "$ORCHESTRATOR"
+
+echo
+echo "== the checkout page, in a browser =="
+node tools/verify_checkout_page.mjs
+
+echo
+echo "the SDK works against this install, and PayU would accept its forms"

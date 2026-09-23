@@ -156,6 +156,7 @@ final class CheckoutResponder
 
         return [
             'type' => $checkout->type->value,
+            'provider' => $checkout->provider,
             'session_id' => $checkout->sessionId,
             'token' => $checkout->token,
             'redirect_url' => $checkout->redirectUrl,

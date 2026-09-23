@@ -32,7 +32,7 @@ if ($order->isPaid()) {
 ## Install
 
 ```bash
-composer require ctpl/ctpl-payments
+composer require cybonetic/ctpl-payments-laravel
 php artisan vendor:publish --tag=ctpl-payments-config   # optional
 ```
 
@@ -143,6 +143,11 @@ integration breaks in front of a paying customer.
 `Payments::checkout()` returns a redirect or the signed form where the
 server can finish, and renders `ctpl-payments::checkout` where it cannot.
 Only `custom` is refused, and it says so.
+
+The page knows which gateway it is for from `$order->checkout->provider`,
+which the platform sends. It does not infer it from the payload's shape —
+a payload that gains a field, or a gateway whose shape overlaps another's,
+would otherwise load the wrong script in front of somebody trying to pay.
 
 Restyle the page if you want it in your own layout:
 

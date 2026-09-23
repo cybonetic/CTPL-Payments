@@ -24,6 +24,18 @@ final readonly class Checkout
     public function __construct(
         public string $sessionId,
         public CheckoutType $type,
+
+        /**
+         * Which gateway this payment was routed to, as the platform
+         * names it — `RAZORPAY`, `CASHFREE`, `PAYU`, `PHONEPE`.
+         *
+         * Null from an orchestrator that predates it, in which case
+         * anything rendering a checkout is back to guessing from the
+         * payload's shape. It is worth not guessing: a payload that
+         * gains a field, or a gateway whose shape overlaps another's,
+         * silently loads the wrong script in front of a paying customer.
+         */
+        public ?string $provider = null,
         public string $token,
         public ?string $redirectUrl = null,
         public ?string $publicKey = null,
@@ -43,6 +55,7 @@ final readonly class Checkout
             // and `redirect_url` is present on every type that has ever
             // shipped.
             type: CheckoutType::tryFrom((string) ($data['type'] ?? '')) ?? CheckoutType::Redirect,
+            provider: isset($data['provider']) ? (string) $data['provider'] : null,
             token: (string) ($data['token'] ?? ''),
             redirectUrl: isset($data['redirect_url']) ? (string) $data['redirect_url'] : null,
             publicKey: isset($data['public_key']) ? (string) $data['public_key'] : null,
