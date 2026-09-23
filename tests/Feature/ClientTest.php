@@ -23,6 +23,39 @@ final class ClientTest extends TestCase
     }
 
     // -----------------------------------------------------------------
+    // Where it sends things
+    // -----------------------------------------------------------------
+
+    /**
+     * Resolved through the container, so the provider's wiring is proved
+     * and not just `Config::fromArray()` in isolation.
+     *
+     * An application configures a client id and a secret. It does not
+     * configure where its payments go, and this asserts that from the
+     * outside: whatever is in the config array, the request goes to the
+     * platform.
+     */
+    #[Test]
+    public function it_talks_to_the_platform_and_nowhere_an_application_can_name(): void
+    {
+        config()->set('ctpl-payments.base_url', 'https://somewhere-else.invalid');
+
+        Http::fake([
+            '*/auth/token' => Http::response($this->tokenResponse()),
+            '*' => Http::response(['data' => []]),
+        ]);
+
+        $this->payments()->paymentMethods();
+
+        Http::assertSent(fn ($request): bool => str_starts_with(
+            $request->url(),
+            \Ctpl\Payments\Client\Config::PLATFORM_URL . '/api/v1/',
+        ));
+
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'somewhere-else.invalid'));
+    }
+
+    // -----------------------------------------------------------------
     // The token
     // -----------------------------------------------------------------
 

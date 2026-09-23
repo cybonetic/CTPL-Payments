@@ -16,7 +16,15 @@ abstract class TestCase extends Orchestra
 
     protected function defineEnvironment($app): void
     {
-        $app['config']->set('ctpl-payments.base_url', 'https://payments.test');
+        /*
+         * No base URL is set, and none can be.
+         *
+         * The URL is a constant in `Config`, so the faked HTTP
+         * expectations below match against `Config::PLATFORM_URL` rather
+         * than against a host a test invented. That is the point: a test
+         * that pointed the SDK somewhere else would be testing a
+         * configuration no application can have.
+         */
         $app['config']->set('ctpl-payments.client_id', 'ctpl_test_client');
         $app['config']->set('ctpl-payments.client_secret', 'secret');
         // No sleeping in tests.

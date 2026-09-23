@@ -39,7 +39,10 @@ use PHPUnit\Framework\Attributes\Test;
  * against an install it has checked is up.
  *
  * Needs:
- *   CTPL_PAYMENTS_URL, CTPL_PAYMENTS_CLIENT_ID, CTPL_PAYMENTS_CLIENT_SECRET
+ *   CTPL_PAYMENTS_BASE_URL_OVERRIDE — the local orchestrator. Honoured
+ *     only because testbench runs as `testing`; an application cannot set
+ *     the platform URL at all, which is the point of the constant.
+ *   CTPL_PAYMENTS_CLIENT_ID, CTPL_PAYMENTS_CLIENT_SECRET
  *   CTPL_TEST_AMOUNT — must match what the sandbox's status query reports
  */
 final class AgainstRealOrchestratorTest extends TestCase
@@ -48,13 +51,21 @@ final class AgainstRealOrchestratorTest extends TestCase
 
     protected function defineEnvironment($app): void
     {
-        foreach (['CTPL_PAYMENTS_URL', 'CTPL_PAYMENTS_CLIENT_ID', 'CTPL_PAYMENTS_CLIENT_SECRET'] as $key) {
+        $required = [
+            // Read by `Config::resolveBaseUrl()`, and honoured only
+            // because testbench runs as `testing`. In any other
+            // environment the constant wins and this is ignored.
+            'CTPL_PAYMENTS_BASE_URL_OVERRIDE',
+            'CTPL_PAYMENTS_CLIENT_ID',
+            'CTPL_PAYMENTS_CLIENT_SECRET',
+        ];
+
+        foreach ($required as $key) {
             if ((string) getenv($key) === '') {
                 $this->markTestSkipped($key . ' is not set; run this through tools/verify_sdk.sh');
             }
         }
 
-        $app['config']->set('ctpl-payments.base_url', (string) getenv('CTPL_PAYMENTS_URL'));
         $app['config']->set('ctpl-payments.client_id', (string) getenv('CTPL_PAYMENTS_CLIENT_ID'));
         $app['config']->set('ctpl-payments.client_secret', (string) getenv('CTPL_PAYMENTS_CLIENT_SECRET'));
         $app['config']->set('ctpl-payments.confirm.timeout_seconds', 60);
