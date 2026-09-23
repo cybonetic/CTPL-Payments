@@ -1,5 +1,5 @@
 {
-    "name": "cybonetic/ctpl-payments-laravel",
+    "name": "ctpl/ctpl-payments",
     "description": "Take payments through the CTPL Central Payment Orchestrator from a Laravel application.",
     "type": "library",
     "license": "proprietary",
