@@ -55,6 +55,10 @@ export CTPL_PAYMENTS_BASE_URL_OVERRIDE="$BASE"
 export CTPL_PAYMENTS_CLIENT_ID="$(echo "$CREDS" | sed -n 's/^client_id=//p')"
 export CTPL_PAYMENTS_CLIENT_SECRET="$(echo "$CREDS" | sed -n 's/^client_secret=//p')"
 export CTPL_TEST_AMOUNT="$(echo "$CREDS" | sed -n 's/^amount=//p')"
+# The host the seeder gave the application, so the return-URL tests
+# build their URLs from what was actually seeded rather than from a
+# constant two files have to keep in step.
+export CTPL_TEST_RETURN_HOST="$(echo "$CREDS" | sed -n 's/^return_host=//p')"
 # So the signature cross-check can run the PLATFORM's own signer
 # rather than this package agreeing with itself.
 export CTPL_ORCHESTRATOR_PATH="$(cd "$ORCHESTRATOR" && pwd)"

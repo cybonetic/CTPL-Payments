@@ -32,7 +32,7 @@ if ($order->isPaid()) {
 ## Install
 
 ```bash
-composer require cybonetic/ctpl-payments
+composer require cybonetic/ctpl-payments-laravel
 php artisan vendor:publish --tag=ctpl-payments-config   # optional
 ```
 
@@ -120,30 +120,84 @@ $order = Payments::pay(
 
 ### Getting the customer to the gateway
 
-There are five checkout types because gateways genuinely differ, and which
-one a payment gets is decided by routing at the moment the attempt opens.
-Reading `redirect_url` and hoping is how an integration breaks in front of
-a paying customer.
+One line, for every gateway:
 
 ```php
-return CheckoutResponder::respond($order);
+return Payments::checkout($order);
 ```
 
-handles `redirect` and `form_post` — the two a server can complete on its
-own. The other three (`sdk`, `intent`, `qr`) need JavaScript, and
-`respond()` **refuses** them rather than sending the customer somewhere
-that cannot take their money:
+That is the whole of it. There are **six** checkout types because gateways
+genuinely differ, and which one a payment gets is decided by routing at the
+moment the attempt opens — reading `redirect_url` and hoping is how an
+integration breaks in front of a paying customer.
+
+| Type | Gateway | What happens |
+|---|---|---|
+| `redirect` | PhonePe | A 302 to the gateway. |
+| `hosted` | PayU | An auto-submitting form carrying the gateway's signed fields. |
+| `sdk` | Razorpay, Cashfree | The gateway's own script, loaded from its own CDN and opened for you. |
+| `intent` | UPI | The UPI link on a phone, the QR everywhere else. |
+| `qr` | UPI | A code to scan. |
+| `custom` | — | An adapter described it itself; read the payload. |
+
+`Payments::checkout()` returns a redirect or the signed form where the
+server can finish, and renders `ctpl-payments::checkout` where it cannot.
+Only `custom` is refused, and it says so.
+
+Restyle the page if you want it in your own layout:
+
+```
+php artisan vendor:publish --tag=ctpl-payments-views
+```
+
+`CheckoutResponder::respond()` is still there and still refuses the
+browser-driven types; `CheckoutResponder::payloadFor($order)` gives you the
+data if you would rather build the page yourself. That payload is safe to
+put in a page: the session token is scoped to one payment and expires with
+it. It is **not** your API token.
+
+### Coming back to the page the payment started on
+
+By default a customer lands on the one return URL configured for your
+application in the operator portal. To send them back to the exact page
+they started from instead:
 
 ```php
-if (CheckoutResponder::isServerDriven($order)) {
-    return CheckoutResponder::respond($order);
-}
-
-return view('checkout', ['checkout' => CheckoutResponder::payloadFor($order)]);
+// config/ctpl-payments.php
+'return_to_origin' => true,
 ```
 
-That payload is safe to put in a page: the session token is scoped to one
-payment and expires with it. It is **not** your API token.
+Every payment then carries the URL of the page that created it. Three
+things have to line up:
+
+1. **Return to origin** is switched on for this application in the operator
+   portal, with the domains your payments may start from recorded beside it
+   (`example.com` covers `shop.example.com`).
+2. The page's URL is on one of those domains.
+3. It is `https`. A customer who has just entered a card number is not
+   being redirected over plain http.
+
+Miss any of them and you get a **422 on your first call**, which is the
+right moment to find out. Override it for one payment — a modal, a queued
+job, a retry — with `returnUrl:`:
+
+```php
+$order = Payments::pay(
+    reference: 'INV-2026-0042',
+    amount: Money::rupees(1250),
+    returnUrl: route('invoices.show', $invoice),
+);
+```
+
+Whichever page receives them, **look the payment up**. The redirect carries
+`?payment_order_id=po_…` and no status, deliberately — it means "the
+customer is back", never "the money moved":
+
+```php
+$order = Payments::order($request->query('payment_order_id'));
+
+return $order->isPaid() ? view('paid') : view('pending');
+```
 
 ### Confirming it
 

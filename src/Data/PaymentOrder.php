@@ -35,6 +35,17 @@ final readonly class PaymentOrder
         public ?string $invoiceReference = null,
         public ?string $purpose = null,
         public ?string $description = null,
+
+        /**
+         * Where this payment's customer comes back to, as the platform
+         * RECORDED it — null meaning the application's own default.
+         *
+         * Read it back rather than assuming: a URL the platform refused
+         * is a URL that is not here, and finding that out from this
+         * field is better than finding it out from a customer who has
+         * paid and cannot get home.
+         */
+        public ?string $returnUrl = null,
         public ?Customer $customer = null,
         public array $attempts = [],
         public array $metadata = [],
@@ -71,6 +82,7 @@ final readonly class PaymentOrder
             invoiceReference: isset($data['invoice_reference']) ? (string) $data['invoice_reference'] : null,
             purpose: isset($data['purpose']) ? (string) $data['purpose'] : null,
             description: isset($data['description']) ? (string) $data['description'] : null,
+            returnUrl: isset($data['return_url']) ? (string) $data['return_url'] : null,
             customer: is_array($data['customer'] ?? null) ? Customer::fromApi($data['customer']) : null,
             attempts: $attempts,
             metadata: is_array($data['metadata'] ?? null) ? $data['metadata'] : [],

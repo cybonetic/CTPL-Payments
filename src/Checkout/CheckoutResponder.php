@@ -19,7 +19,7 @@ use Illuminate\Http\Response;
  *  WHY THIS IS NOT JUST `redirect($checkout->redirectUrl)`
  * ------------------------------------------------------------------
  *
- * There are five checkout types because gateways genuinely differ, and
+ * There are six checkout types because gateways genuinely differ, and
  * which one a payment gets is decided by routing at the moment the
  * attempt is opened. An integration that read `redirect_url` and assumed
  * it worked is one that breaks the first time a payment is routed to a
@@ -28,11 +28,14 @@ use Illuminate\Http\Response;
  *
  * So the branch lives here, once, rather than in every controller.
  *
- * Two of the five the server can complete alone: `redirect` and
- * `form_post`. The other three need JavaScript on the page, and this
- * class will not pretend otherwise — `respond()` refuses them with a
- * message naming what to do, rather than redirecting somewhere that will
- * not work. `payloadFor()` gives you what to hand your front end.
+ * Two of the six the server can complete alone: `redirect` and
+ * `hosted`. The rest need the page to do something, and this class will
+ * not pretend otherwise — `respond()` refuses them with a message naming
+ * what to do, rather than redirecting somewhere that will not work.
+ *
+ * For those, return the `ctpl-payments::checkout` view, which renders
+ * the right handoff for every type. `payloadFor()` is there for an
+ * application that would rather build its own page.
  */
 final class CheckoutResponder
 {
@@ -56,23 +59,85 @@ final class CheckoutResponder
 
         return match ($checkout->type) {
             CheckoutType::Redirect => self::redirect($checkout),
-            CheckoutType::FormPost => self::formPost($checkout),
+            CheckoutType::Hosted => self::hostedForm($checkout),
 
             // Deliberately a refusal rather than a best effort. Sending a
             // customer to an SDK payload's `redirect_url` — which for some
             // gateways exists and is not a checkout — shows them a page
             // that cannot take their money.
-            CheckoutType::Sdk, CheckoutType::Intent, CheckoutType::Qr => throw new PaymentsException(
+            CheckoutType::Sdk, CheckoutType::Intent, CheckoutType::Qr, CheckoutType::Custom => throw new PaymentsException(
                 sprintf(
-                    'This payment was routed to a [%s] checkout, which the browser has to complete: hand '
-                    . 'CheckoutResponder::payloadFor($order) to your front end and let the gateway\'s own '
-                    . 'script, UPI intent or QR renderer take it from there. Returning a redirect here '
-                    . 'would send the customer somewhere that cannot take their money.',
+                    'This payment was routed to a [%s] checkout, which the browser has to complete. '
+                    . 'Return CheckoutResponder::page($order) — or Payments::checkout($order) — which '
+                    . 'renders the gateway\'s own script, UPI intent or QR for you%s. Returning a '
+                    . 'redirect here would send the customer somewhere that cannot take their money.',
                     $checkout->type->value,
+                    $checkout->type === CheckoutType::Custom
+                        ? ', except for [custom], which means the adapter described this itself: read '
+                            . 'CheckoutResponder::payloadFor($order) and render it yourself'
+                        : '',
                 ),
                 type: 'checkout_needs_browser',
             ),
         };
+    }
+
+    /**
+     * The one call that works for every checkout type.
+     *
+     * ------------------------------------------------------------------
+     *  WHY THIS EXISTS ALONGSIDE `respond()`
+     * ------------------------------------------------------------------
+     *
+     * `respond()` is honest about what a server can do alone and refuses
+     * the rest. That honesty left every integration to write the
+     * gateway JavaScript itself — and an application that had written
+     * Razorpay's but not Cashfree's showed a customer an error the first
+     * time routing chose Cashfree. Reported from a live install.
+     *
+     * So this returns a redirect or a signed form where the server can
+     * finish, and the `ctpl-payments::checkout` page where it cannot.
+     * One line in a controller, for every gateway, today and after the
+     * next one is added:
+     *
+     *     return Payments::checkout($order);
+     *
+     * `custom` is still refused, because it means "an adapter described
+     * this itself" and a page that guessed would be a broken checkout
+     * rather than a clear error.
+     */
+    public static function page(Checkout|PaymentOrder $checkout): RedirectResponse|Response
+    {
+        $resolved = self::checkoutOf($checkout);
+
+        if ($resolved->type->isServerDriven()) {
+            return self::respond($resolved);
+        }
+
+        if (! $resolved->type->hasBuiltInCheckoutPage()) {
+            return self::respond($resolved); // throws, with the reason
+        }
+
+        if ($resolved->hasExpired()) {
+            throw new PaymentsException(
+                'This checkout session has expired. Open a new attempt on the order rather than sending '
+                . 'the customer to a session the gateway will refuse.',
+                type: 'session_not_usable',
+            );
+        }
+
+        return new Response(
+            (string) view('ctpl-payments::checkout', ['checkout' => $resolved]),
+            200,
+            [
+                'Content-Type' => 'text/html; charset=UTF-8',
+
+                // A checkout page is one customer's one payment. A cache
+                // anywhere between here and them holding it is a second
+                // customer being shown the first one's session.
+                'Cache-Control' => 'no-store, private',
+            ],
+        );
     }
 
     /**
@@ -130,11 +195,24 @@ final class CheckoutResponder
      * Values are escaped with `htmlspecialchars` including quotes, because
      * a gateway's payload is somebody else's data appearing in our markup.
      */
-    private static function formPost(Checkout $checkout): Response
+    private static function hostedForm(Checkout $checkout): Response
     {
-        if ($checkout->redirectUrl === null || $checkout->redirectUrl === '') {
+        /*
+         * `action` first, `redirect_url` second.
+         *
+         * PayU sends both and they are the same URL today. They are not
+         * required to stay the same: `action` is part of the form the
+         * platform signed, and posting a signed form somewhere other
+         * than where it was signed for is how a hash stops matching in
+         * production and nowhere else.
+         */
+        $action = is_string($checkout->payload['action'] ?? null) && $checkout->payload['action'] !== ''
+            ? $checkout->payload['action']
+            : $checkout->redirectUrl;
+
+        if ($action === null || $action === '') {
             throw new PaymentsException(
-                'The gateway described a form-post checkout and gave nowhere to post it to.',
+                'The gateway described a hosted checkout and gave nowhere to post it to.',
                 type: 'malformed_response',
             );
         }
@@ -145,10 +223,27 @@ final class CheckoutResponder
             'UTF-8',
         );
 
-        $action = $escape($checkout->redirectUrl);
+        $method = strtoupper((string) ($checkout->payload['method'] ?? 'POST'));
+        $method = in_array($method, ['POST', 'GET'], true) ? $method : 'POST';
+
+        $escapedAction = $escape($action);
         $fields = '';
 
+        /*
+         * `action` and `method` are instructions about the form, not
+         * fields in it. Posting them back to PayU as inputs is harmless
+         * on a good day and is not what was signed; leaving them out is
+         * what the platform's own hosted checkout page does.
+         */
         foreach ($checkout->payload as $name => $value) {
+            if ($name === 'action' || $name === 'method' || $name === 'display_amount') {
+                continue;
+            }
+
+            if ($value === null) {
+                continue;
+            }
+
             $fields .= sprintf(
                 '<input type="hidden" name="%s" value="%s">',
                 $escape($name),
@@ -164,7 +259,7 @@ final class CheckoutResponder
             </head>
             <body style="font-family:system-ui,sans-serif;text-align:center;padding:3rem 1rem">
             <p>Taking you to your bank to complete the payment. Please do not close this window.</p>
-            <form id="ctpl-checkout" method="POST" action="{$action}">{$fields}
+            <form id="ctpl-checkout" method="{$method}" action="{$escapedAction}">{$fields}
             <noscript><button type="submit">Continue to payment</button></noscript>
             </form>
             <script>document.getElementById('ctpl-checkout').submit();</script>

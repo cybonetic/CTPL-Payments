@@ -1,6 +1,6 @@
 {
-    "name": "cybonetic/ctpl-payments",
-    "description": "Take payments through the CTPL Central Payment Orchestrator from a Internal Laravel application.",
+    "name": "cybonetic/ctpl-payments-laravel",
+    "description": "Take payments through the CTPL Central Payment Orchestrator from a Laravel application.",
     "type": "library",
     "license": "proprietary",
     "keywords": ["laravel", "payments", "ctpl", "payment-orchestrator"],

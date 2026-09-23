@@ -59,10 +59,26 @@ final class PaymentsServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        /*
+         * The checkout page, so no application writes gateway
+         * JavaScript.
+         *
+         * `loadViewsFrom` and not a publish: the view has to work
+         * without anybody publishing anything, because an integration
+         * that has to run a publish command before a Cashfree payment
+         * can open is an integration that discovers this from a
+         * customer. Publishing is offered for restyling.
+         */
+        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'ctpl-payments');
+
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__ . '/../config/ctpl-payments.php' => $this->app->configPath('ctpl-payments.php'),
             ], 'ctpl-payments-config');
+
+            $this->publishes([
+                __DIR__ . '/../resources/views' => $this->app->resourcePath('views/vendor/ctpl-payments'),
+            ], 'ctpl-payments-views');
 
             $this->commands([PingCommand::class]);
         }

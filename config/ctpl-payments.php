@@ -99,6 +99,33 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Coming back to the page the payment started on
+    |--------------------------------------------------------------------------
+    |
+    | Off by default. Switched on, every payment this SDK creates carries
+    | the URL of the page that created it, and the platform returns the
+    | customer there instead of to the one landing route configured for
+    | the whole application.
+    |
+    | It needs the matching setting in the operator portal: "Return to
+    | origin", with the domains your payments may start from recorded
+    | beside it. Without those the platform cannot tell your pages from
+    | anybody else's and refuses the URL with a 422 on the first call —
+    | which is the right moment to find out, rather than from a customer
+    | who has paid and gone missing.
+    |
+    | Only https URLs are sent. A customer who has just entered a card
+    | number is not being redirected over plain http.
+    |
+    | Pass `returnUrl:` to `pay()` or `createOrder()` to override it for
+    | one payment — a modal, a queued job, a retry driven by a webhook.
+    |
+    */
+
+    'return_to_origin' => (bool) env('CTPL_PAYMENTS_RETURN_TO_ORIGIN', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Receiving events
     |--------------------------------------------------------------------------
     |

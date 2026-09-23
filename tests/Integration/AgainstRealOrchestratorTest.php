@@ -225,6 +225,59 @@ final class AgainstRealOrchestratorTest extends TestCase
         $this->assertSame($first->id, $second->id, 'the same key created two payments');
     }
 
+    /**
+     * ------------------------------------------------------------------
+     *  THE RETURN DESTINATION, CHECKED AGAINST THE REAL RULE
+     * ------------------------------------------------------------------
+     *
+     * The platform decides what a per-order `return_url` may be, and the
+     * rule depends on how the application is configured. `seed_api_client.php`
+     * puts this one in the commonest state — a success URL, no allow-list,
+     * return-to-origin off — where the rule is "same site as the success
+     * URL", and prints the host so this builds its URLs from what was
+     * actually seeded.
+     *
+     * A faked suite cannot check any of this: the rule lives on the
+     * platform, and this package agreeing with its own stub proves
+     * nothing about it.
+     */
+    #[Test]
+    public function the_platform_accepts_a_return_url_on_its_own_site(): void
+    {
+        $host = (string) (getenv('CTPL_TEST_RETURN_HOST') ?: 'sdk-suite.example.test');
+
+        $order = $this->payments()->createOrder(
+            $this->reference('sdk-return'),
+            $this->amount(),
+            returnUrl: 'https://' . $host . '/invoices/42?from=suite',
+        );
+
+        // Echoed back, so a URL the platform quietly dropped is visible
+        // here rather than to a customer who has finished paying.
+        $this->assertSame(
+            'https://' . $host . '/invoices/42?from=suite',
+            $this->payments()->order($order)->returnUrl,
+            'the platform did not record the return URL it accepted',
+        );
+    }
+
+    /** And refuses one on somebody else's. */
+    #[Test]
+    public function the_platform_refuses_a_return_url_on_another_site(): void
+    {
+        try {
+            $this->payments()->createOrder(
+                $this->reference('sdk-return-bad'),
+                $this->amount(),
+                returnUrl: 'https://somewhere-else.invalid/collect',
+            );
+
+            $this->fail('the platform accepted a return URL on a site this application has not declared');
+        } catch (Exceptions\ValidationFailed $e) {
+            $this->assertStringContainsStringIgnoringCase('return_url', json_encode($e->details) ?: '');
+        }
+    }
+
     #[Test]
     public function a_payment_that_does_not_exist_is_a_typed_not_found(): void
     {

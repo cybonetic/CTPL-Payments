@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Ctpl\Payments;
 
+use Ctpl\Payments\Checkout\CheckoutResponder;
 use Ctpl\Payments\Client\Client;
+use Ctpl\Payments\Data\Checkout;
 use Ctpl\Payments\Data\Customer;
 use Ctpl\Payments\Data\GatewayStatus;
 use Ctpl\Payments\Data\Money;
@@ -72,6 +74,7 @@ final class PaymentsManager
         ?string $invoiceReference = null,
         array $metadata = [],
         ?string $idempotencyKey = null,
+        ?string $returnUrl = null,
     ): PaymentOrder {
         $response = $this->client->mutate('POST', 'payment-orders', $idempotencyKey ?? $reference . ':order', array_filter([
             'external_reference' => $reference,
@@ -82,6 +85,7 @@ final class PaymentsManager
             'purpose' => $purpose,
             'customer' => $customer?->toArray(),
             'metadata' => $metadata === [] ? null : $metadata,
+            'return_url' => $returnUrl ?? $this->returnToOrigin(),
         ], static fn (mixed $v): bool => $v !== null));
 
         return PaymentOrder::fromApi($response['data'], $response['checkout'] ?? null);
@@ -130,6 +134,7 @@ final class PaymentsManager
         ?PaymentMethodType $method = null,
         ?string $description = null,
         array $metadata = [],
+        ?string $returnUrl = null,
     ): PaymentOrder {
         $order = $this->createOrder(
             reference: $reference,
@@ -137,9 +142,62 @@ final class PaymentsManager
             customer: $customer,
             description: $description,
             metadata: $metadata,
+            returnUrl: $returnUrl,
         );
 
         return $this->openAttempt($order, $method);
+    }
+
+    /**
+     * ------------------------------------------------------------------
+     *  COMING BACK TO THE PAGE THE PAYMENT STARTED ON
+     * ------------------------------------------------------------------
+     *
+     * Switch `return_to_origin` on in the config and every payment
+     * carries the URL of the page that started it, so the customer comes
+     * back to exactly where they were rather than to one landing route
+     * for the whole application.
+     *
+     * Three things have to line up, and the failure when they do not is
+     * a 422 on the first call rather than a customer going missing:
+     *
+     *   - the same setting is on for this application in the operator
+     *     portal, and the domains it may return to are recorded there;
+     *   - this URL is on one of those domains;
+     *   - it is an https URL, because a customer who has just paid is
+     *     not being sent over plain http.
+     *
+     * Passing `returnUrl:` explicitly always wins, for the cases where
+     * the page that starts a payment is not the page that should receive
+     * the customer — a modal, a queued job, a webhook-driven retry.
+     *
+     * Deliberately NOT a request header: this SDK runs on YOUR server,
+     * and the `Origin` of the call it makes to the platform is your
+     * server rather than the customer's browser. The URL has to be the
+     * one you are rendering, which only you know.
+     */
+    private function returnToOrigin(): ?string
+    {
+        if ((bool) config('ctpl-payments.return_to_origin', false) !== true) {
+            return null;
+        }
+
+        if (! function_exists('request') || ! app()->bound('request')) {
+            return null;
+        }
+
+        $request = request();
+
+        // A console command, a queue worker: there is no page, and
+        // inventing one from a CLI request would send the customer to
+        // `http://localhost`.
+        if ($request === null || ! $request->isMethod('GET') && ! $request->isMethod('POST')) {
+            return null;
+        }
+
+        $url = $request->fullUrl();
+
+        return str_starts_with($url, 'https://') ? $url : null;
     }
 
     // -----------------------------------------------------------------
@@ -147,6 +205,20 @@ final class PaymentsManager
     // -----------------------------------------------------------------
 
     /** One look at a payment, right now. */
+    /**
+     * The response that takes this customer to their gateway.
+     *
+     * Whatever the routing chose — PhonePe's redirect, PayU's signed
+     * form, Razorpay's or Cashfree's own script, a UPI intent, a QR —
+     * this is the whole of it:
+     *
+     *     return Payments::checkout($order);
+     */
+    public function checkout(PaymentOrder|Checkout $order): \Illuminate\Http\RedirectResponse|\Illuminate\Http\Response
+    {
+        return CheckoutResponder::page($order);
+    }
+
     public function order(string|PaymentOrder $order): PaymentOrder
     {
         $response = $this->client->get('payments/' . $this->idOf($order));
